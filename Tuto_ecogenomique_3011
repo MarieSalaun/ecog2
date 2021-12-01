@@ -57,21 +57,25 @@ list.files(miseq_path)
 ````{r}
 fnFs <- sort(list.files(miseq_path, pattern="_R1_001.fastq"))
 fnRs <- sort(list.files(miseq_path, pattern="_R2_001.fastq"))
-
+````
 #elle prend l'élement de fnfs prend le premier element de la liste fnfs --> transofmration nom de fichier en nombre d'échantillons :
 #[`, 1) veut dire qu'il s'applique à chaque element de la liste
+````{r}
 sampleNames <- sapply(strsplit(fnFs, "_"), `[`, 1)
 fnFs <- file.path(miseq_path, fnFs)
 fnRs <- file.path(miseq_path, fnRs)
+````
 #ci dessus on s'assure que ça pointe bien vers les bons fichiers 
-#file path = 
+#file path =
+````{r}
 fnFs[1:3]
 plotQualityProfile(fnFs[1:2])
+````
 #fonction de DADA2, appliqué sur les 2 1ers élements de la liste : lecture des dossiers fastQ de Fnfs. En gris foncé : les scores de qualité pour chacune des positions = pour tous les reads le score de qualité (fréquence d'apparition = une chance sur 30 (3*0) que la base soit pas la bonne) le plus frequent = 38 en fonction de la position du NT sur les 250 affichées 
 #la ligne verte = le score de qualité moyen pour tout le fichier à chaque pos 
 #ligne rouge = proportion des reads qui vont au moins à telle position (dépend des methodes de séquençages qui produisent des reads plus ou moins longs)
 #obsrvations : plus la seq s'allonge plus les scores de qualité chutent
-
+````{r}
 plotQualityProfile(fnRs[1:2])
 
 filt_path<- file.path(miseq_path,"filtered")
@@ -84,6 +88,7 @@ out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
               compress=TRUE, multithread=TRUE)
 head(out)
+````
 #création de la variable out qui recoit la fonction filterandtrim : trie les résultats de filtrage qualité. 
 #trunclen : Pour le E1 on garde les 240 premiers et pour le R2 on conserve que les 160 premiers. 240-160 : correspond à la chute des scores de qualité. On garde juste assez pour le chevauchement de V4 
 #maxN : nb max de bases indéfinies dans la séquences. Qd le séquenceur ne sait pas quoi mettre, il indique "n". Plus le nb de n = élevé, moins la séquence est de bonne qualité. Ici toutes les séquences avec un n dégagent du jeu de données --> il enlève à la fois le reverse et le forward. 
@@ -93,37 +98,48 @@ head(out)
 #multitrat : on utilise tous les processeurs de la machine (dans cette VM il y en a 4)
 
 #analyse DADA2 : création d'un modèle d'erreur puis correction 
+````{r}
 derepFs <- derepFastq(filtFs, verbose = TRUE)
 derepRs <-derepFastq(filtRs, verbose = TRUE)
+````
 #on ne conserve qu'une fois la même séquence dans l'échantillon 
 #verbose : indique à la machine d'écrire les étapes de ce qu'elle est en train de faire
-
+````{r}
 names(derepFs)<-sampleNames
 names(derepRs)<-sampleNames
+````
 
 #déréplication 
+````{r}
 errF<-learnErrors(filtFs, multithread = TRUE)
 errR<-learnErrors(filtRs, multithread = TRUE)
+````
 #apprentissage des erreurs 
 
 #dereplication
+````{r}
 plotErrors(errF)
 plotErrors(errR)
+````
 # fréquence des erreurs observées par DADA2 (log) en fonction de la moyenne des scores de qualité pour les différentes positions des nt. type erreur : T2A, cad que répertoire des erreurs : base T(base initiale) donne A(erreur). Calcule du profil derreur
 
 #Construction d'une table de séquences et suppression des chimères
+````{r}
 dadaFs<- dada(derepFs, err = errF, multithread = TRUE)
 dadaRs<-dada(derepRs, err=errR,multithread = TRUE)
 dadaFs[[1]]
+```
 #applique les corrections d'erreurs directement dans les reads dans les forward et les reverse. pour T2A, il transforme les Aerreurs en T. En theorie, les erreurs de sequençages ont ete supprimees. Plus de raison de faire des OTU pour def des unites ecologiques d où l interet de faire des ASV (variant sequence amplicon). ON A DONC DEFINIT NOS UNITES ECOLOGIQUES
 #dadafs : permet d'orienter / objet de classement de la liste [1]. 
 
 #contruction d'une table de séquence 
+````{r}
 mergers<-mergePairs(dadaFs, derepFs, dadaRs, derepRs)
 seqtabAll<-makeSequenceTable(mergers[!grepl("Mock",names(mergers))])
 table((nchar(getSequences(seqtabAll))))
 #suppression des chimères 
 seqtabNoC<- removeBimeraDenovo(seqtabAll)
+```
 #mergers : aligment des forward et reverse
 #make sequence table : table de frequence
 #mergepairs : prend le forward et le reverse pour les assemble en 1 contig qui recouvre tout le V4. s'applique aux jeux de lectures imllimina corrigés, dérépliqués 
@@ -133,20 +149,22 @@ seqtabNoC<- removeBimeraDenovo(seqtabAll)
 
 #attribution d'une taxonomie
 ```
+
 ```{bash}
 cd ~
 wget https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz
 #le lien renvoie vers un assigneur taxonomique (taxonomic classifier) mais nec jeu de données d'entrainement (sorte de machind learning) 
 #a partie de jeu de données de ref --> assignement taxonomie de ref sur le jeu de donnée ; formation de taxtable ; diff niveaux d'assignation de taxonomie ()
+```
 
-
+```{r}
 #étape pour télécharger dans le répertoire
 
 fastaRef<-"/home/rstudio/silva_nr99_v138.1_train_set.fa.gz"
 taxTab<-assignTaxonomy(seqtabNoC, refFasta = fastaRef, multithread = TRUE)
 unname(head(taxTab))
 
-#construction d'un abre phylogén&tique
+#construction d'un abre phylogénétique
 seqs<- getSequences(seqtabNoC)
 names(seqs)<-seqs
 alignment<-AlignSeqs(DNAStringSet(seqs), anchor=NA, verbose=FALSE)
@@ -154,24 +172,150 @@ alignment<-AlignSeqs(DNAStringSet(seqs), anchor=NA, verbose=FALSE)
 #utilsation du package Phangorn
 phangAlign<-phyDat(as(alignment, "matrix"), type="DNA")
 dm<-dist.ml(phangAlign)
-treeNj<-NJ(dm)
-fit= pml(treeNJ,data=phangAlign)
+treeNJ<-NJ(dm)
+fit= pml(treeNJ, data=phangAlign)
 fitGTR<- update(fit,k=4, inv=0.2)
-fitGTR<- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE, rearragement = "stochastic", control= pml.control(trace=0))
-detach("package : phangorn", unload=TRUE)
+fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+        rearrangement = "stochastic", control = pml.control(trace = 0))
+detach("package:phangorn", unload=TRUE)
 
-#Combiner des données dans un objet phyloseq
-samdf <- read.csv("https://raw.githubusercontent.com/spholmes/F1000_workflow/master/data/MIMARKS_Data_combined.csv",header=TRUE)
-samdf$
+plot(phangAlign)
 ```
 
 
-````
-#F pour forward et R pour reverse
 ```{r}
+samdf <- read.csv("https://raw.githubusercontent.com/spholmes/F1000_workflow/master/data/MIMARKS_Data_combined.csv",header=TRUE)
+samdf$SampleID <- paste0(gsub("00", "", samdf$host_subject_id), "D", samdf$age-21)
+samdf <- samdf[!duplicated(samdf$SampleID),] # Remove dupicate entries for reverse reads
+rownames(seqtabAll) <- gsub("124", "125", rownames(seqtabAll)) # Fix discrepancy
+all(rownames(seqtabAll) %in% samdf$SampleID) # TRUE
+#contient la table d'obs, table taxo, arbre si nécessaire + table de métadonnées 
 
 ```
+Correspond à toutes les métadonnées associées aux souris. cf lien vers la publi sur slack. permet de corriger les erreurs pres dans la table; 
 
 
 
+```{r}
+rownames(samdf) <- samdf$SampleID
+keep.cols <- c("collection_date", "biome", "target_gene", "target_subfragment",
+"host_common_name", "host_subject_id", "age", "sex", "body_product", "tot_mass",
+"diet", "family_relationship", "genotype", "SampleID") 
+samdf <- samdf[rownames(seqtabAll), keep.cols]
+```
+accesseur : permet de rechercher des infomations, ici le sous objet ... dans ... à l'aide du $ --> va chercher des infos dans un objet complexe.  
+si utilsations de [] cherche un element de la liste mais uniquement sa valeur. ici permet de sortir l'âge de toutes les souris. Nec que les colonnes aient un nom. Les noms de ligne de samdf vont recevoir les infos cont dans sampleID. Chaque echantillon a reçu un nom (une taxonomie) qui lui correspond. Avant ils n'avaoent pas de nom ou alors étaient appellés 1,2,3,4 etc.  
+keep.cols reçoit un vecteur c() = suite de noms. application pout sous echantillonner samdf. 
+
+```{r}
+ps <- phyloseq(otu_table(seqtabNoC, taxa_are_rows=FALSE), 
+               sample_data(samdf), 
+               tax_table(taxTab),phy_tree(fitGTR$tree))
+ps <- prune_samples(sample_names(ps) != "Mock", ps) # Remove mock sample
+ps
+```
+ps = objet qui reçoit la fonction phyloseq --> construit un objet à partir de ses differents composants. les élements sont la table d'obs sans les chimères, taxonomie = à part sur une autre table. la nouvelle table construite = table d'OTU. 2nd arg = arbre phylogénétique (phy_tree)
+Ici l'abre ... 
+prunesamble : objets contenant MOC, on ne les garde pas pour construire l'arbre définitif
+
+ps_connect <-url("https://raw.githubusercontent.com/spholmes/F1000_workflow/master/data/ps.rds")
+ps = readRDS(ps_connect)
+ps
+
+on aurait pu télécharger ce ps.rds pour importer toutes les données associées si on ne les avaient pas dejà fait? 
+
+
+```{r}
+rank_names(ps)
+```
+Permet de supprimer les séquences qui ne correspondent pas à des bacties/ archées/ euca --> exclusion de la table de taxonomie Ps. On suppose qu'il s'agit d'erreurs de séquençage. On peut aussi enlever toutes les séquences qui ne sont pas associées à un philum / phylum uncaracterised. ça comprend aussi les séquences que l'on ne connait pas/ qu'on a pas identifiées. 
+
+```{r}
+table(tax_table(ps)[, "Phylum"], exclude = NULL)
+```
+```{r}
+ps <- subset_taxa(ps, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
+```
+```{r}
+prevdf = apply(X = otu_table(ps),
+               MARGIN = ifelse(taxa_are_rows(ps), yes = 1, no = 2),
+               FUN = function(x){sum(x > 0)})
+```
+```{r}
+prevdf = data.frame(Prevalence = prevdf,
+                    TotalAbundance = taxa_sums(ps),
+                    tax_table(ps))
+```
+```{r}
+plyr::ddply(prevdf, "Phylum", function(df1){cbind(mean(df1$Prevalence),sum(df1$Prevalence))})
+```
+```{r}
+filterPhyla = c("Fusobacteria", "Deinococcus-Thermus")
+# Filter entries with unidentified Phylum.
+ps1 = subset_taxa(ps, !Phylum %in% filterPhyla)
+ps1
+```
+```{r}
+prevdf1 = subset(prevdf, Phylum %in% get_taxa_unique(ps1, "Phylum"))
+ggplot(prevdf1, aes(TotalAbundance, Prevalence / nsamples(ps),color=Phylum)) +
+  # Include a guess for parameter
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) +  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + theme(legend.position="none")
+```
+
+calcule la prévalence, donc la présence dans un grand nombre d'échantillons de tel phyla. 
+```{r}
+prevalenceThreshold = 0.05 * nsamples(ps)
+prevalenceThreshold
+```
+
+Cette valeur correspond pas à celle du tuto car on a pas utilisé la même base silva (elle a été updated)
+```{r}
+keepTaxa = rownames(prevdf1)[(prevdf1$Prevalence >= prevalenceThreshold)]
+ps2 = prune_taxa(keepTaxa, ps)
+```
+ 
+```{r}
+.cran_packages <- c( "shiny","miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest", "dplyr", "ggrepel", "nlme", "devtools",
+                  "reshape2", "PMA", "structSSI", "ade4",
+                  "ggnetwork", "intergraph", "scales")
+.github_packages <- c("jfukuyama/phyloseqGraphTest")
+.bioc_packages <- c("genefilter", "impute")
+
+```
+ 
+
+```{r}
+.cran_packages <- c( "shiny","miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest", "dplyr", "ggrepel", "nlme", "devtools",
+                  "reshape2", "PMA", "structSSI", "ade4",
+                  "ggnetwork", "intergraph", "scales")
+.github_packages <- c("jfukuyama/phyloseqGraphTest")
+.bioc_packages <- c("genefilter", "impute")
+```
+
+```{r}
+.inst <- .cran_packages %in% installed.packages()
+if (any(!.inst)){
+  install.packages(.cran_packages[!.inst],repos = "http://cran.rstudio.com/")
+}
+```
+
+```{r}
+.inst <- .github_packages %in% installed.packages()
+if (any(!.inst)){
+  devtools::install_github(.github_packages[!.inst])
+}
+```
+ 
+```{r}
+.inst <- .bioc_packages %in% installed.packages()
+if(any(!.inst)){BiocManager::install(.bioc_packages[!.inst])
+}
+```
+
+```{r}
+length(get_taxa_unique(ps2, taxonomic.rank = "Genus"))
+ps3 = tax_glom(ps2, "Genus", NArm = TRUE)
+```
 
