@@ -1,0 +1,177 @@
+---
+title: "R Notebook"
+output: github_document
+---
+permier test de controle de version 
+
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{bash}
+sudo apt-get update -y
+sudo apt-get install -y libglpk-dev 
+sudo apt-get install -y liblzma-dev libbz2-dev
+```
+
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("BiocStyle")a
+BiocManager::install("Rhtslib")
+```
+```{r}
+library("knitr")
+library("BiocStyle")
+.cran_packages <- c("ggplot2", "gridExtra", "devtools")
+install.packages(.cran_packages) 
+.bioc_packages <- c("dada2", "phyloseq", "DECIPHER", "phangorn")
+BiocManager::install(.bioc_packages)
+# Load packages into session, and print package version
+sapply(c(.cran_packages, .bioc_packages), require, character.only = TRUE)
+````
+
+```{bash}
+cd ~
+wget https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip
+unzip miseqsopdata.zip
+```
+```{r}
+install.packages("gitcreds")
+````
+
+````{r}
+set.seed(100)
+miseq_path <- "./MiSeq_SOP"
+list.files(miseq_path)
+````
+````{r}
+set.seed(100)
+miseq_path <- "/home/rstudio/MiSeq_SOP"
+list.files(miseq_path)
+````
+
+#Lecture des fichiers 
+````{r}
+fnFs <- sort(list.files(miseq_path, pattern="_R1_001.fastq"))
+fnRs <- sort(list.files(miseq_path, pattern="_R2_001.fastq"))
+
+#elle prend l'élement de fnfs prend le premier element de la liste fnfs --> transofmration nom de fichier en nombre d'échantillons :
+#[`, 1) veut dire qu'il s'applique à chaque element de la liste
+sampleNames <- sapply(strsplit(fnFs, "_"), `[`, 1)
+fnFs <- file.path(miseq_path, fnFs)
+fnRs <- file.path(miseq_path, fnRs)
+#ci dessus on s'assure que ça pointe bien vers les bons fichiers 
+#file path = 
+fnFs[1:3]
+plotQualityProfile(fnFs[1:2])
+#fonction de DADA2, appliqué sur les 2 1ers élements de la liste : lecture des dossiers fastQ de Fnfs. En gris foncé : les scores de qualité pour chacune des positions = pour tous les reads le score de qualité (fréquence d'apparition = une chance sur 30 (3*0) que la base soit pas la bonne) le plus frequent = 38 en fonction de la position du NT sur les 250 affichées 
+#la ligne verte = le score de qualité moyen pour tout le fichier à chaque pos 
+#ligne rouge = proportion des reads qui vont au moins à telle position (dépend des methodes de séquençages qui produisent des reads plus ou moins longs)
+#obsrvations : plus la seq s'allonge plus les scores de qualité chutent
+
+plotQualityProfile(fnRs[1:2])
+
+filt_path<- file.path(miseq_path,"filtered")
+if(!file_test("-d", filt_path)) dir.create(filt_path)
+filtFs<-file.path(filt_path, paste0 (sampleNames, "_F_filt.fastq.gz"))
+filtRs<-file.path(filt_path, paste0(sampleNames,"_R_filt.fastq.gz"))
+#filtration qualité des fichers des forwards et reverse. on a donc créé ces dossiers à cette étape 
+
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=TRUE)
+head(out)
+#création de la variable out qui recoit la fonction filterandtrim : trie les résultats de filtrage qualité. 
+#trunclen : Pour le E1 on garde les 240 premiers et pour le R2 on conserve que les 160 premiers. 240-160 : correspond à la chute des scores de qualité. On garde juste assez pour le chevauchement de V4 
+#maxN : nb max de bases indéfinies dans la séquences. Qd le séquenceur ne sait pas quoi mettre, il indique "n". Plus le nb de n = élevé, moins la séquence est de bonne qualité. Ici toutes les séquences avec un n dégagent du jeu de données --> il enlève à la fois le reverse et le forward. 
+#trunc quality 2 : on enlève toutes les bases avec un score de qualité de 20 
+#phix : sert de controle qualité dans le run. Mais il faut l'enlever du jeu de données ensuite 
+#compress = TRUE : 
+#multitrat : on utilise tous les processeurs de la machine (dans cette VM il y en a 4)
+
+#analyse DADA2 : création d'un modèle d'erreur puis correction 
+derepFs <- derepFastq(filtFs, verbose = TRUE)
+derepRs <-derepFastq(filtRs, verbose = TRUE)
+#on ne conserve qu'une fois la même séquence dans l'échantillon 
+#verbose : indique à la machine d'écrire les étapes de ce qu'elle est en train de faire
+
+names(derepFs)<-sampleNames
+names(derepRs)<-sampleNames
+
+#déréplication 
+errF<-learnErrors(filtFs, multithread = TRUE)
+errR<-learnErrors(filtRs, multithread = TRUE)
+#apprentissage des erreurs 
+
+#dereplication
+plotErrors(errF)
+plotErrors(errR)
+# fréquence des erreurs observées par DADA2 (log) en fonction de la moyenne des scores de qualité pour les différentes positions des nt. type erreur : T2A, cad que répertoire des erreurs : base T(base initiale) donne A(erreur). Calcule du profil derreur
+
+#Construction d'une table de séquences et suppression des chimères
+dadaFs<- dada(derepFs, err = errF, multithread = TRUE)
+dadaRs<-dada(derepRs, err=errR,multithread = TRUE)
+dadaFs[[1]]
+#applique les corrections d'erreurs directement dans les reads dans les forward et les reverse. pour T2A, il transforme les Aerreurs en T. En theorie, les erreurs de sequençages ont ete supprimees. Plus de raison de faire des OTU pour def des unites ecologiques d où l interet de faire des ASV (variant sequence amplicon). ON A DONC DEFINIT NOS UNITES ECOLOGIQUES
+#dadafs : permet d'orienter / objet de classement de la liste [1]. 
+
+#contruction d'une table de séquence 
+mergers<-mergePairs(dadaFs, derepFs, dadaRs, derepRs)
+seqtabAll<-makeSequenceTable(mergers[!grepl("Mock",names(mergers))])
+table((nchar(getSequences(seqtabAll))))
+#suppression des chimères 
+seqtabNoC<- removeBimeraDenovo(seqtabAll)
+#mergers : aligment des forward et reverse
+#make sequence table : table de frequence
+#mergepairs : prend le forward et le reverse pour les assemble en 1 contig qui recouvre tout le V4. s'applique aux jeux de lectures imllimina corrigés, dérépliqués 
+#make sequence table : constuction d'une table de seq = combien de fois les seq (ASV)ont été vue dans chaque échantillon. exclue de ce prox les ech qui cont le mot "moc" (=communauté artificielle créer à partie de pls souches que l'on connait bien --> melange dans des prop° relavites differentes. permet d'évaluer le pipeline informatique appliqué aux données et verifier la qualité de ce dernier et mev des eventuels problèmes informatiques) 
+#getsequence : cherche sequences dans la table seqtaball : lecture du nb de caractères... forme histogramme ; res de cette fonction = 1 seq de 251 nt, etc. Indique la long du V4 = en gen 253 nt 
+#nachar : supprime les séquences chimères (appariements de re g 16S hautement conservées entre pls bactos diff). identification de ces chimères car un bout du fragment appartient à une bactos alors que l'autre bout à une autre bactos) création d'une nouv table : "NoC" "no chimère". précisions de 22 à 4% pas compris 
+
+#attribution d'une taxonomie
+```
+```{bash}
+cd ~
+wget https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz
+#le lien renvoie vers un assigneur taxonomique (taxonomic classifier) mais nec jeu de données d'entrainement (sorte de machind learning) 
+#a partie de jeu de données de ref --> assignement taxonomie de ref sur le jeu de donnée ; formation de taxtable ; diff niveaux d'assignation de taxonomie ()
+
+
+#étape pour télécharger dans le répertoire
+
+fastaRef<-"/home/rstudio/silva_nr99_v138.1_train_set.fa.gz"
+taxTab<-assignTaxonomy(seqtabNoC, refFasta = fastaRef, multithread = TRUE)
+unname(head(taxTab))
+
+#construction d'un abre phylogén&tique
+seqs<- getSequences(seqtabNoC)
+names(seqs)<-seqs
+alignment<-AlignSeqs(DNAStringSet(seqs), anchor=NA, verbose=FALSE)
+
+#utilsation du package Phangorn
+phangAlign<-phyDat(as(alignment, "matrix"), type="DNA")
+dm<-dist.ml(phangAlign)
+treeNj<-NJ(dm)
+fit= pml(treeNJ,data=phangAlign)
+fitGTR<- update(fit,k=4, inv=0.2)
+fitGTR<- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE, rearragement = "stochastic", control= pml.control(trace=0))
+detach("package : phangorn", unload=TRUE)
+
+#Combiner des données dans un objet phyloseq
+samdf <- read.csv("https://raw.githubusercontent.com/spholmes/F1000_workflow/master/data/MIMARKS_Data_combined.csv",header=TRUE)
+samdf$
+```
+
+
+````
+#F pour forward et R pour reverse
+```{r}
+
+```
+
+
+
+
